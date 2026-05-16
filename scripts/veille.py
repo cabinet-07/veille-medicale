@@ -129,26 +129,45 @@ def pubmed_search(query, days_back, retmax):
 # RÉSUMÉ via GROQ (gratuit)
 # ============================================================
 def groq_chat(prompt, max_tokens=4000):
-    """Appelle Groq API. Doc : https://console.groq.com/docs"""
+    """Appelle Groq API avec retry automatique en cas de rate limit."""
     import time
-    time.sleep(5)
     api_key = os.environ["GROQ_API_KEY"]
-    r = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": GROQ_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
-            "temperature": 0.4,
-        },
-        timeout=120,
-    )
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    delais = [10, 30, 60, 120]  # Délais d'attente progressifs en secondes
+    for tentative in range(len(delais) + 1):
+        try:
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": GROQ_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_tokens,
+                    "temperature": 0.4,
+                },
+                timeout=120,
+            )
+            if r.status_code == 429 and tentative < len(delais):
+                attente = delais[tentative]
+                # Si le serveur indique un retry-after, le respecter
+                retry_after = r.headers.get("retry-after")
+                if retry_after:
+                    try:
+                        attente = max(attente, int(float(retry_after)) + 2)
+                    except ValueError:
+                        pass
+                log.warning(f"Groq rate limit, attente {attente}s (tentative {tentative+1}/{len(delais)})")
+                time.sleep(attente)
+                continue
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+        except requests.exceptions.HTTPError:
+            if tentative >= len(delais):
+                raise
+            time.sleep(delais[tentative])
+    raise RuntimeError("Groq: trop de tentatives échouées")
 
 
 def generer_email_html(donnees):
