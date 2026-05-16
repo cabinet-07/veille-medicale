@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='utf-8'?>
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" version="2.0">
+  <channel>
+    <title>Veille médicale personnelle</title>
+    <link>https://cabinet-07.github.io/veille-medicale</link>
+    <language>fr-fr</language>
+    <description>Veille médicale automatique — médecine générale, robotique humanoïde, thérapies innovantes. Épisodes le mardi et vendredi.</description>
+    <itunes:author>Veille médicale</itunes:author>
+    <itunes:summary>Veille médicale automatique technique francophone, publiée le mardi et vendredi.</itunes:summary>
+    <itunes:explicit>false</itunes:explicit>
+    <itunes:category text="Health &amp; Fitness">
+      <itunes:category text="Medicine" />
+    </itunes:category>
+  <item><title>Veille médicale du 16/05/2026</title><description>Dans le domaine de la médecine générale et interne, une étude publiée dans The British journal of general practice a examiné l'efficacité des recommandations diététiques saines en pratique générale pour la prévention secondaire des maladies cardiovasculaires.  Les résultats ont montré que les régimes méditerranéens réduisaient significativement la mortalité due aux maladies cardiovasculaires.  
+Un autre article paru dans le Journal of the National Comprehensive Cancer Network a mis à jour les li...</description><pubDate>Sat, 16 May 2026 10:49:41 GMT</pubDate><guid isPermaLink="false">veille_20260516</guid><enclosure url="https://cabinet-07.github.io/veille-medicale/episodes/veille_20260516.mp3" length="1008576" type="audio/mpeg" /><itunes:duration>57</itunes:duration><itunes:explicit>false</itunes:explicit></item></channel>
+</rss>
