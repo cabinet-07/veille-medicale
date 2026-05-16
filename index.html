@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Veille médicale — Podcast</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;
+       max-width:720px;margin:30px auto;padding:0 20px;color:#222;line-height:1.6}
+  h1{color:#0066cc}
+  .feed-url{background:#f0f4f8;padding:15px;border-radius:8px;border-left:4px solid #0066cc;
+            word-break:break-all;font-family:monospace;font-size:14px}
+  .btn{display:inline-block;background:#0066cc;color:#fff;padding:10px 20px;
+       border-radius:5px;text-decoration:none;margin:5px 5px 5px 0}
+  .btn:hover{background:#004999}
+  .step{background:#f9f9f9;padding:15px;margin:10px 0;border-radius:5px}
+</style>
+</head>
+<body>
+<h1>🩺 Veille médicale — Mon podcast</h1>
+
+<p>Épisodes générés automatiquement le <strong>mardi</strong> et le <strong>vendredi</strong>, durée ~20 min, niveau technique.</p>
+
+<h2>📡 URL du flux podcast (à copier dans votre app)</h2>
+<div class="feed-url" id="feed-url">
+  Chargement... (l'URL sera visible une fois la première publication faite)
+</div>
+<script>
+  // Affiche dynamiquement l'URL du feed
+  const baseUrl = window.location.origin + window.location.pathname.replace(/\/$/, '');
+  document.getElementById('feed-url').textContent = baseUrl + '/podcast/feed.xml';
+</script>
+
+<h2>📱 Comment l'ajouter à votre téléphone Android</h2>
+
+<div class="step">
+  <strong>1. Installez une app podcast :</strong><br>
+  <a class="btn" href="https://play.google.com/store/apps/details?id=au.com.shiftyjelly.pocketcasts">Pocket Casts</a>
+  <a class="btn" href="https://play.google.com/store/apps/details?id=de.danoeh.antennapod">AntennaPod (gratuit)</a>
+</div>
+
+<div class="step">
+  <strong>2. Ajoutez le flux par URL :</strong><br>
+  Dans l'app : <em>Profil → Ajouter un podcast → Ajouter par URL</em><br>
+  Collez l'URL ci-dessus.
+</div>
+
+<div class="step">
+  <strong>3. Activez le téléchargement automatique :</strong><br>
+  L'app téléchargera chaque nouvel épisode dès sa publication (mardi et vendredi matin).
+</div>
+
+<div class="step">
+  <strong>4. Lecture en voiture :</strong><br>
+  Compatible Android Auto, Bluetooth, et toutes les fonctions podcast (vitesse 1.5x, marque-pages, etc.)
+</div>
+
+<h2>🎧 Épisodes</h2>
+<p>Voir le <a href="podcast/feed.xml">flux XML brut</a> ou la liste des fichiers dans le dossier <code>podcast/episodes/</code> du dépôt.</p>
+
+<hr>
+<p style="color:#888;font-size:13px">Ce podcast est privé, généré pour mon usage personnel. Non destiné à la diffusion publique.</p>
+</body>
+</html>

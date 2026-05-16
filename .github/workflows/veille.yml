@@ -1,0 +1,87 @@
+name: Veille médicale quotidienne
+
+on:
+  schedule:
+    # 7h00 heure de Paris = 05:00 UTC en été (CEST), 06:00 UTC en hiver (CET)
+    # On programme 05:00 UTC + 06:00 UTC pour couvrir les deux, avec garde anti-doublon
+    - cron: '0 5 * * *'   # 7h en été
+    - cron: '0 6 * * *'   # 7h en hiver
+  workflow_dispatch:        # permet de lancer manuellement depuis l'interface GitHub
+    inputs:
+      mode:
+        description: 'Mode (auto = email + audio si mardi/vendredi)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - email
+          - audio
+
+jobs:
+  veille:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Récupération du dépôt
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Vérification de l'heure (évite double exécution)
+        id: time_check
+        run: |
+          PARIS_HOUR=$(TZ='Europe/Paris' date +%H)
+          echo "Heure Paris : $PARIS_HOUR"
+          if [ "$PARIS_HOUR" != "07" ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "Pas 7h à Paris, on saute."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configuration Python
+        if: steps.time_check.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Installation des dépendances
+        if: steps.time_check.outputs.skip != 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests edge-tts
+
+      - name: Détermination de l'URL podcast
+        if: steps.time_check.outputs.skip != 'true'
+        id: podcast_url
+        run: |
+          REPO_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+          OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
+          echo "url=https://${OWNER}.github.io/${REPO_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Exécution de la veille
+        if: steps.time_check.outputs.skip != 'true'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          PODCAST_BASE_URL: ${{ steps.podcast_url.outputs.url }}
+          RUN_MODE: ${{ github.event.inputs.mode || 'auto' }}
+        run: python scripts/veille.py
+
+      - name: Commit & push des nouveaux épisodes
+        if: steps.time_check.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain podcast/)" ]; then
+            git add podcast/
+            git commit -m "📻 Nouvel épisode podcast $(date +%Y-%m-%d)"
+            git push
+            echo "Épisode poussé sur GitHub Pages"
+          else
+            echo "Pas de nouvel épisode à publier"
+          fi
