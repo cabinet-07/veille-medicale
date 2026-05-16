@@ -225,7 +225,7 @@ Génère UNIQUEMENT le HTML, sans balises <html>, <body>, ni explication."""
 
 
 def generer_script_audio(donnees):
-    """Script narratif pour podcast de 20 min ~2800 mots, niveau technique."""
+    """Script narratif pour podcast de ~10 min, niveau technique."""
     payload = []
     for theme, articles in donnees.items():
         if not articles:
@@ -235,20 +235,18 @@ def generer_script_audio(donnees):
             payload.append(
                 f"\n- {a['title']}\n  Journal: {a['journal']} ({a['year']})\n"
                 f"  Type: {', '.join(a.get('pub_types', []))}\n"
-                f"  Abstract: {a['abstract'][:1500]}"
+                f"  Abstract: {a['abstract'][:1200]}"
             )
     payload_text = "\n".join(payload)
-
     date_fr = datetime.now().strftime("%d %B %Y")
-
     prompt = f"""Tu rédiges le SCRIPT ORAL d'un podcast de veille médicale technique francophone, épisode du {date_fr}.
 
-DUREE CIBLE : 20 minutes (environ 2800 mots, débit 140 mots/minute).
+DUREE CIBLE : 10 minutes (environ 1400 mots, débit 140 mots/minute).
 
 CONTRAINTES DE STYLE :
 - Niveau TECHNIQUE médical : terminologie précise, on parle à des médecins
 - Phrases courtes et fluides, pour être lues à voix haute
-- Transitions naturelles entre les sujets ("Passons maintenant à...", "Du côté de...")
+- Transitions naturelles entre les sujets
 - AUCUNE liste à puces, AUCUN titre, AUCUN markdown — texte oral continu
 - Pas d'URL ni de DOI à l'oral, juste le nom du journal et l'année
 - Pour chaque étude : contexte clinique, méthodologie, résultats chiffrés (p, IC95%, NNT...), implication pour la pratique
@@ -256,17 +254,18 @@ CONTRAINTES DE STYLE :
 DEBUT IMPERATIF : "Bonjour, voici votre veille médicale du {date_fr}."
 FIN IMPERATIVE : "C'était votre veille médicale, bonne journée."
 
-STRUCTURE :
-1. Médecine générale et interne (8-10 min, ~5 études les plus pertinentes)
-2. Robotique humanoïde et prothèses (4-5 min, ~3 développements)
-3. Thérapies innovantes (5-6 min, ~4 études)
+STRUCTURE (1400 mots au total) :
+1. Médecine générale et interne (5 min, ~700 mots, 3-4 études les plus pertinentes)
+2. Robotique humanoïde et prothèses (2-3 min, ~350 mots, 2 développements)
+3. Thérapies innovantes (2-3 min, ~350 mots, 2-3 études)
+
+IMPERATIF : générer le script COMPLET de 1400 mots, sans le couper. Si tu manques de place, raccourcis chaque section proportionnellement mais conserve l'introduction et la conclusion.
 
 ARTICLES (sélectionne les plus pertinents, ignore le bruit) :
 {payload_text}
 
 Écris UNIQUEMENT le script à lire à voix haute, sans aucune autre indication ni guillemet."""
-
-    return groq_chat(prompt, max_tokens=6000)
+    return groq_chat(prompt, max_tokens=4000)
 
 
 # ============================================================
@@ -314,7 +313,7 @@ def ajouter_episode_au_feed(fichier_mp3, titre, description, duree_secondes):
     """Ajoute un nouvel item au flux RSS."""
     initialiser_feed()
     base_url = os.environ.get("PODCAST_BASE_URL", "").rstrip("/")
-    mp3_url = f"{base_url}/episodes/{fichier_mp3.name}"
+    mp3_url = f"{base_url}/podcast/episodes/{fichier_mp3.name}"
     taille = fichier_mp3.stat().st_size
     pub_date = formatdate(timeval=None, localtime=False, usegmt=True)
     guid = fichier_mp3.stem
