@@ -75,22 +75,34 @@ PUBMED_QUERIES = {
     ),
 }
 
-
 def pubmed_search(query, days_back, retmax):
     base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
     date_filter = f' AND ("last {days_back} days"[edat])'
-    r = requests.get(f"{base}/esearch.fcgi", params={
-        "db": "pubmed", "term": query + date_filter,
-        "retmax": retmax, "sort": "date", "retmode": "json",
-    }, timeout=30)
-    pmids = r.json().get("esearchresult", {}).get("idlist", [])
+    try:
+        r = requests.get(f"{base}/esearch.fcgi", params={
+            "db": "pubmed", "term": query + date_filter,
+            "retmax": retmax, "sort": "date", "retmode": "json",
+        }, timeout=30)
+        r.raise_for_status()
+        pmids = r.json().get("esearchresult", {}).get("idlist", [])
+    except Exception as e:
+        log.warning(f"Echec esearch: {e}")
+        return []
     if not pmids:
         return []
-    r = requests.get(f"{base}/efetch.fcgi", params={
-        "db": "pubmed", "id": ",".join(pmids), "retmode": "xml",
-    }, timeout=30)
+    try:
+        r = requests.get(f"{base}/efetch.fcgi", params={
+            "db": "pubmed", "id": ",".join(pmids), "retmode": "xml",
+        }, timeout=30)
+        r.raise_for_status()
+        if not r.text.strip().startswith("<"):
+            log.warning(f"Reponse efetch non-XML: {r.text[:200]}")
+            return []
+        root = ET.fromstring(r.text)
+    except Exception as e:
+        log.warning(f"Echec efetch/parse: {e}")
+        return []
     articles = []
-    root = ET.fromstring(r.text)
     for art in root.findall(".//PubmedArticle"):
         pmid = art.findtext(".//PMID") or ""
         title = art.findtext(".//ArticleTitle") or ""
@@ -107,7 +119,10 @@ def pubmed_search(query, days_back, retmax):
                 "pmid": pmid, "pub_types": pub_types,
                 "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
             })
+    import time
+    time.sleep(0.4)
     return articles
+
 
 
 # ============================================================
