@@ -316,46 +316,43 @@ def ajouter_episode_au_feed(fichier_mp3, titre, description, duree_secondes):
     base_url = os.environ.get("PODCAST_BASE_URL", "").rstrip("/")
     mp3_url = f"{base_url}/episodes/{fichier_mp3.name}"
     taille = fichier_mp3.stat().st_size
-
-    # Lire le feed existant
+    pub_date = formatdate(timeval=None, localtime=False, usegmt=True)
+    guid = fichier_mp3.stem
+    ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
+    ET.register_namespace("itunes", ITUNES_NS)
+    ET.register_namespace("content", "http://purl.org/rss/1.0/modules/content/")
     tree = ET.parse(FEED_PATH)
     root = tree.getroot()
     channel = root.find("channel")
-
-    # Construire le nouvel item (en string pour gérer correctement les namespaces)
-    pub_date = formatdate(timeval=None, localtime=False, usegmt=True)
-    guid = fichier_mp3.stem
-
-    item_xml = f"""<item>
-      <title>{xml_escape(titre)}</title>
-      <description>{xml_escape(description)}</description>
-      <pubDate>{pub_date}</pubDate>
-      <guid isPermaLink="false">{guid}</guid>
-      <enclosure url="{mp3_url}" length="{taille}" type="audio/mpeg"/>
-      <itunes:duration>{int(duree_secondes)}</itunes:duration>
-      <itunes:explicit>false</itunes:explicit>
-    </item>"""
-
-    # Insérer le nouvel item juste après la description du channel
-    item_element = ET.fromstring(item_xml)
-    # Trouver la dernière balise non-item du channel et insérer après
+    item = ET.Element("item")
+    title_el = ET.SubElement(item, "title")
+    title_el.text = titre
+    desc_el = ET.SubElement(item, "description")
+    desc_el.text = description
+    pubdate_el = ET.SubElement(item, "pubDate")
+    pubdate_el.text = pub_date
+    guid_el = ET.SubElement(item, "guid")
+    guid_el.set("isPermaLink", "false")
+    guid_el.text = guid
+    enc_el = ET.SubElement(item, "enclosure")
+    enc_el.set("url", mp3_url)
+    enc_el.set("length", str(taille))
+    enc_el.set("type", "audio/mpeg")
+    dur_el = ET.SubElement(item, "{%s}duration" % ITUNES_NS)
+    dur_el.text = str(int(duree_secondes))
+    expl_el = ET.SubElement(item, "{%s}explicit" % ITUNES_NS)
+    expl_el.text = "false"
     insert_index = 0
     for i, child in enumerate(channel):
         if child.tag != "item":
             insert_index = i + 1
         else:
             break
-    channel.insert(insert_index, item_element)
-
-    # Garder seulement les 50 derniers épisodes
+    channel.insert(insert_index, item)
     items = channel.findall("item")
     if len(items) > 50:
         for old in items[50:]:
             channel.remove(old)
-
-    # Enregistrer (en ré-enregistrant les namespaces correctement)
-    ET.register_namespace("itunes", "http://www.itunes.com/dtds/podcast-1.0.dtd")
-    ET.register_namespace("content", "http://purl.org/rss/1.0/modules/content/")
     tree.write(FEED_PATH, encoding="utf-8", xml_declaration=True)
 
 
