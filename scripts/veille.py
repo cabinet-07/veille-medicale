@@ -120,7 +120,7 @@ def pubmed_search(query, days_back, retmax):
                 "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
             })
     import time
-    time.sleep(0.4)
+    time.sleep(1.5)
     return articles
 
 
@@ -130,6 +130,8 @@ def pubmed_search(query, days_back, retmax):
 # ============================================================
 def groq_chat(prompt, max_tokens=4000):
     """Appelle Groq API. Doc : https://console.groq.com/docs"""
+    import time
+    time.sleep(5)
     api_key = os.environ["GROQ_API_KEY"]
     r = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
