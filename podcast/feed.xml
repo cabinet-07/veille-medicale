@@ -1,7 +1,5 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"
-     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
-     xmlns:content="http://purl.org/rss/1.0/modules/content/">
+<?xml version='1.0' encoding='utf-8'?>
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" version="2.0">
   <channel>
     <title>Veille médicale personnelle</title>
     <link>https://cabinet-07.github.io/veille-medicale</link>
@@ -11,7 +9,7 @@
     <itunes:summary>Veille médicale automatique technique francophone, publiée le mardi et vendredi.</itunes:summary>
     <itunes:explicit>false</itunes:explicit>
     <itunes:category text="Health &amp; Fitness">
-      <itunes:category text="Medicine"/>
+      <itunes:category text="Medicine" />
     </itunes:category>
-  </channel>
+  <item><title>Veille médicale du 19/05/2026</title><description>Dans le domaine de la médecine générale et interne, une étude publiée dans le journal Supportive care in cancer a examiné les méthodes et les outils utilisés pour mesurer l'expérience des patients en oncologie.  Les résultats ont montré que les enquêtes basées sur des questionnaires sont les plus couramment utilisées, mais qu'il existe une fragmentation significative dans les outils utilisés, avec la plupart d'entre eux utilisés dans des études limitées.  Cette étude souligne la nécessité d'une ...</description><pubDate>Tue, 19 May 2026 15:33:14 GMT</pubDate><guid isPermaLink="false">veille_20260519</guid><enclosure url="https://cabinet-07.github.io/veille-medicale/podcast/episodes/veille_20260519.mp3" length="1356480" type="audio/mpeg" /><itunes:duration>77</itunes:duration><itunes:explicit>false</itunes:explicit></item></channel>
 </rss>
