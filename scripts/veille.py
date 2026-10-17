@@ -4,55 +4,53 @@
 Veille médicale automatique — exécution cloud (GitHub Actions)
 
 Tâches :
-- Tous les jours : collecte PubMed, résumé Groq, envoi email
-- Mardi & vendredi : génère un épisode podcast MP3 de ~20 min,
+- Tous les jours : collecte PubMed + Google News, résumé Groq, envoi email
+- Mardi & vendredi : génère un épisode podcast MP3 de ~10 min,
   l'ajoute au flux RSS et le pousse sur GitHub Pages
 
+Thèmes suivis :
+- Médecine générale & interne (PubMed)
+- Robotique humanoïde / actualités industrielles (Google News RSS)
+- Thérapies innovantes (PubMed)
+
 Variables d'environnement requises (secrets GitHub) :
-  GROQ_API_KEY          - Clé API Groq (gratuite sur console.groq.com)
-  SMTP_USER             - Adresse Gmail expéditrice
-  SMTP_PASSWORD         - Mot de passe d'application Gmail
-  MAIL_TO               - Adresse destinataire
-  PODCAST_BASE_URL      - URL publique du flux (ex: https://USER.github.io/veille-medicale-cloud)
+  GROQ_API_KEY, SMTP_USER, SMTP_PASSWORD, MAIL_TO, PODCAST_BASE_URL
 """
 
 import os
 import sys
-import json
 import asyncio
 import smtplib
 import logging
 import requests
+import urllib.parse
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formatdate
 from pathlib import Path
 from xml.etree import ElementTree as ET
-from xml.sax.saxutils import escape as xml_escape
 
 import edge_tts
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
-JOURS_RECULS = 2            # 2 jours pour rattraper le week-end
+JOURS_RECULS = 2
 ARTICLES_PAR_THEME = 7
 GROQ_MODEL = "openai/gpt-oss-120b"
 
-# Dossiers
 ROOT = Path(__file__).resolve().parent.parent
 PODCAST_DIR = ROOT / "podcast"
 EPISODES_DIR = PODCAST_DIR / "episodes"
 EPISODES_DIR.mkdir(parents=True, exist_ok=True)
 FEED_PATH = PODCAST_DIR / "feed.xml"
 
-# Logging
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("veille")
 
 # ============================================================
-# REQUÊTES PUBMED
+# SOURCES PAR THÈME
 # ============================================================
 PUBMED_QUERIES = {
     "Médecine générale & interne": (
@@ -60,12 +58,6 @@ PUBMED_QUERIES = {
         '"primary health care"[MeSH] OR "family practice"[MeSH]) '
         'AND (review[pt] OR randomized controlled trial[pt] OR '
         'meta-analysis[pt] OR guideline[pt])'
-    ),
-    "Robotique humanoïde & prothèses": (
-        '("artificial limbs"[MeSH] OR "robotics"[MeSH] OR '
-        '"prosthesis design"[MeSH] OR "exoskeleton"[tiab] OR '
-        '"humanoid"[tiab] OR "bionic"[tiab] OR '
-        '"brain-computer interface"[tiab] OR "neural prosthesis"[tiab])'
     ),
     "Thérapies innovantes": (
         '("gene therapy"[MeSH] OR "cell- and tissue-based therapy"[MeSH] OR '
@@ -75,6 +67,20 @@ PUBMED_QUERIES = {
     ),
 }
 
+# Google News RSS pour la robotique humanoïde (actualités industrielles)
+GNEWS_QUERIES = {
+    "Robotique humanoïde": [
+        '"humanoid robot" OR "robot humanoide"',
+        '"Tesla Optimus" OR "Figure AI" OR "Figure 02" OR "Figure 03"',
+        '"Boston Dynamics Atlas" OR "Unitree H1" OR "Unitree G1"',
+        '"Agility Robotics" OR "Digit robot" OR "Apptronik Apollo"',
+        '"1X Neo" OR "Sanctuary AI" OR "Fourier GR"',
+    ],
+}
+
+# ============================================================
+# COLLECTE PUBMED
+# ============================================================
 def pubmed_search(query, days_back, retmax):
     base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
     date_filter = f' AND ("last {days_back} days"[edat])'
@@ -124,15 +130,72 @@ def pubmed_search(query, days_back, retmax):
     return articles
 
 
+# ============================================================
+# COLLECTE GOOGLE NEWS (pour robotique humanoïde)
+# ============================================================
+def google_news_search(queries, days_back, retmax_total):
+    """Interroge Google News RSS pour une liste de requêtes et dédoublonne."""
+    import time
+    articles = []
+    seen_urls = set()
+    seen_titles = set()
+    cutoff = datetime.now(timezone.utc).timestamp() - (days_back * 86400)
+    for q in queries:
+        try:
+            # Google News RSS : when:Xd filtre sur les X derniers jours
+            full_q = f"{q} when:{days_back}d"
+            url = (
+                "https://news.google.com/rss/search?"
+                f"q={urllib.parse.quote(full_q)}"
+                "&hl=fr&gl=FR&ceid=FR:fr"
+            )
+            r = requests.get(url, timeout=30, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; VeilleBot/1.0)"
+            })
+            r.raise_for_status()
+            root = ET.fromstring(r.text)
+            for item in root.findall(".//item"):
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                desc = (item.findtext("description") or "").strip()
+                pub_date = (item.findtext("pubDate") or "").strip()
+                source = item.find("source")
+                source_name = source.text if source is not None and source.text else "Google News"
+                # Dédoublonnage par URL ET par titre (évite les doublons entre requêtes)
+                if link in seen_urls or title in seen_titles:
+                    continue
+                if not title:
+                    continue
+                seen_urls.add(link)
+                seen_titles.add(title)
+                # Nettoie le HTML basique dans la description
+                import re
+                desc_clean = re.sub(r"<[^>]+>", " ", desc)
+                desc_clean = re.sub(r"\s+", " ", desc_clean).strip()
+                articles.append({
+                    "title": title,
+                    "abstract": desc_clean[:800] if desc_clean else title,
+                    "journal": source_name,
+                    "year": pub_date[:16] if pub_date else "",
+                    "pmid": "",
+                    "pub_types": ["News"],
+                    "url": link,
+                })
+        except Exception as e:
+            log.warning(f"Echec Google News pour '{q}': {e}")
+        time.sleep(1.0)
+    # Tri par date la plus récente et limite au total voulu
+    return articles[:retmax_total]
+
 
 # ============================================================
-# RÉSUMÉ via GROQ (gratuit)
+# RÉSUMÉ via GROQ
 # ============================================================
 def groq_chat(prompt, max_tokens=4000):
     """Appelle Groq API avec retry automatique en cas de rate limit."""
     import time
     api_key = os.environ["GROQ_API_KEY"]
-    delais = [10, 30, 60, 120]  # Délais d'attente progressifs en secondes
+    delais = [10, 30, 60, 120]
     for tentative in range(len(delais) + 1):
         try:
             r = requests.post(
@@ -151,13 +214,14 @@ def groq_chat(prompt, max_tokens=4000):
             )
             if r.status_code == 429 and tentative < len(delais):
                 attente = delais[tentative]
-                # Si le serveur indique un retry-after, le respecter
                 retry_after = r.headers.get("retry-after")
                 if retry_after:
                     try:
                         attente = max(attente, int(float(retry_after)) + 2)
                     except ValueError:
                         pass
+                # Plafond à 2 min pour ne pas bloquer trop longtemps
+                attente = min(attente, 120)
                 log.warning(f"Groq rate limit, attente {attente}s (tentative {tentative+1}/{len(delais)})")
                 time.sleep(attente)
                 continue
@@ -171,7 +235,7 @@ def groq_chat(prompt, max_tokens=4000):
 
 
 def generer_email_html(donnees):
-    """Email technique direct, sans introduction inutile, ~1000 mots."""
+    """Email technique direct, ~1000 mots."""
     payload = []
     for theme, articles in donnees.items():
         if not articles:
@@ -180,41 +244,41 @@ def generer_email_html(donnees):
         for i, a in enumerate(articles, 1):
             payload.append(
                 f"\n[{i}] {a['title']}\n"
-                f"Journal: {a['journal']} ({a['year']})\n"
+                f"Source: {a['journal']} ({a['year']})\n"
                 f"Type: {', '.join(a.get('pub_types', []))}\n"
                 f"URL: {a['url']}\n"
-                f"Abstract: {a['abstract'][:1500]}"
+                f"Contenu: {a['abstract'][:1500]}"
             )
     payload_text = "\n".join(payload)
 
-    prompt = f"""Tu es rédacteur scientifique médical. Génère un email HTML de veille médicale technique en français.
+    prompt = f"""Tu es rédacteur scientifique médical et tech. Génère un email HTML de veille en français.
 
 REGLES IMPERATIVES :
-- AUCUNE phrase d'introduction ni de blabla ("Voici votre veille", "Bonjour", etc.)
+- AUCUNE phrase d'introduction ni de blabla
 - AUCUNE conclusion ni signature
 - Commencer DIRECTEMENT par le contenu utile
-- Niveau TECHNIQUE : terminologie médicale précise, pas de vulgarisation
-- Mentionner systématiquement : type d'étude, taille d'échantillon si dispo, niveau de preuve, p-value ou IC95% si rapporté, implication clinique concrète
+- Niveau TECHNIQUE : terminologie médicale précise pour les sections médicales, détails techniques pour la robotique
+- Pour les études médicales : type d'étude, taille d'échantillon, p-value ou IC95%, implication clinique
+- Pour la robotique humanoïde : spécifications techniques, performances annoncées, calendrier, acteurs impliqués
 - Total : ~1000 mots, lisible en 5 minutes
 
-STRUCTURE HTML (utiliser uniquement <h2>, <h3>, <p>, <strong>, <em>, <a>, <ul>, <li>) :
+STRUCTURE HTML (uniquement <h2>, <h3>, <p>, <strong>, <em>, <a>, <ul>, <li>) :
 
 <h2>Points clés</h2>
 <ul>
-  <li>3 puces avec les 3 informations les plus importantes du jour, toutes catégories confondues</li>
+  <li>3 puces avec les 3 informations les plus importantes du jour</li>
 </ul>
 
 <h2>Médecine générale et interne</h2>
-Pour chaque article retenu, un paragraphe :
-<p><strong>Titre traduit en français</strong> (<em>nom du journal</em>) — Synthèse technique en 3-4 phrases. <a href="URL">PubMed</a></p>
+<p><strong>Titre traduit</strong> (<em>source</em>) — Synthèse technique en 3-4 phrases. <a href="URL">Lien</a></p>
 
-<h2>Robotique humanoïde et prothèses</h2>
-Idem.
+<h2>Robotique humanoïde</h2>
+<p><strong>Titre traduit</strong> (<em>source</em>) — Synthèse factuelle de l'annonce ou de la démonstration. <a href="URL">Lien</a></p>
 
 <h2>Thérapies innovantes</h2>
-Idem.
+<p><strong>Titre traduit</strong> (<em>source</em>) — Synthèse technique. <a href="URL">Lien</a></p>
 
-Sélectionne 3 à 5 articles MAX par section, les plus pertinents (méta-analyses, RCT, guidelines en priorité). Ignore les articles peu intéressants.
+Sélectionne 3 à 5 items MAX par section, les plus pertinents. Pour la robotique, privilégie les annonces concrètes (nouveau modèle, démo, levée de fonds, déploiement industriel) et ignore les articles d'opinion ou purement spéculatifs.
 
 ARTICLES :
 {payload_text}
@@ -233,43 +297,45 @@ def generer_script_audio(donnees):
         payload.append(f"\n=== {theme} ===")
         for a in articles:
             payload.append(
-                f"\n- {a['title']}\n  Journal: {a['journal']} ({a['year']})\n"
+                f"\n- {a['title']}\n  Source: {a['journal']} ({a['year']})\n"
                 f"  Type: {', '.join(a.get('pub_types', []))}\n"
-                f"  Abstract: {a['abstract'][:1200]}"
+                f"  Contenu: {a['abstract'][:1200]}"
             )
     payload_text = "\n".join(payload)
     date_fr = datetime.now().strftime("%d %B %Y")
-    prompt = f"""Tu rédiges le SCRIPT ORAL d'un podcast de veille médicale technique francophone, épisode du {date_fr}.
+
+    prompt = f"""Tu rédiges le SCRIPT ORAL d'un podcast de veille technique francophone, épisode du {date_fr}.
 
 DUREE CIBLE : 10 minutes (environ 1400 mots, débit 140 mots/minute).
 
 CONTRAINTES DE STYLE :
-- Niveau TECHNIQUE médical : terminologie précise, on parle à des médecins
+- Niveau TECHNIQUE : terminologie médicale précise pour la santé, détails techniques pour la robotique
 - Phrases courtes et fluides, pour être lues à voix haute
 - Transitions naturelles entre les sujets
 - AUCUNE liste à puces, AUCUN titre, AUCUN markdown — texte oral continu
-- Pas d'URL ni de DOI à l'oral, juste le nom du journal et l'année
-- Pour chaque étude : contexte clinique, méthodologie, résultats chiffrés (p, IC95%, NNT...), implication pour la pratique
+- Pas d'URL à l'oral, juste le nom de la source
+- Pour les études médicales : contexte, méthodologie, résultats chiffrés, implication pratique
+- Pour la robotique humanoïde : qui, quoi, performances annoncées, calendrier, enjeu
 
-DEBUT IMPERATIF : "Bonjour, voici votre veille médicale du {date_fr}."
-FIN IMPERATIVE : "C'était votre veille médicale, bonne journée."
+DEBUT IMPERATIF : "Bonjour, voici votre veille du {date_fr}."
+FIN IMPERATIVE : "C'était votre veille, bonne journée."
 
 STRUCTURE (1400 mots au total) :
-1. Médecine générale et interne (5 min, ~700 mots, 3-4 études les plus pertinentes)
-2. Robotique humanoïde et prothèses (2-3 min, ~350 mots, 2 développements)
+1. Médecine générale et interne (5 min, ~700 mots, 3-4 études)
+2. Robotique humanoïde (2-3 min, ~350 mots, 2-3 annonces)
 3. Thérapies innovantes (2-3 min, ~350 mots, 2-3 études)
 
-IMPERATIF : générer le script COMPLET de 1400 mots, sans le couper. Si tu manques de place, raccourcis chaque section proportionnellement mais conserve l'introduction et la conclusion.
+IMPERATIF : générer le script COMPLET de 1400 mots.
 
-ARTICLES (sélectionne les plus pertinents, ignore le bruit) :
+ARTICLES :
 {payload_text}
 
-Écris UNIQUEMENT le script à lire à voix haute, sans aucune autre indication ni guillemet."""
+Écris UNIQUEMENT le script à lire à voix haute, sans guillemet ni indication."""
     return groq_chat(prompt, max_tokens=4000)
 
 
 # ============================================================
-# AUDIO TTS (Edge TTS gratuit)
+# AUDIO TTS
 # ============================================================
 async def generer_audio_async(texte, fichier, voix="fr-FR-HenriNeural"):
     communicate = edge_tts.Communicate(texte, voix)
@@ -284,8 +350,7 @@ def generer_audio(texte, fichier):
 # FLUX PODCAST RSS
 # ============================================================
 def initialiser_feed():
-    """Crée le feed.xml initial si absent."""
-    if FEED_PATH.exists():
+    if FEED_PATH.exists() and FEED_PATH.stat().st_size > 100:
         return
     base_url = os.environ.get("PODCAST_BASE_URL", "")
     feed = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -296,9 +361,9 @@ def initialiser_feed():
     <title>Veille médicale personnelle</title>
     <link>{base_url}</link>
     <language>fr-fr</language>
-    <description>Veille médicale automatique — médecine générale, robotique humanoïde, thérapies innovantes. Épisodes le mardi et vendredi.</description>
+    <description>Veille automatique — médecine, robotique humanoïde, thérapies innovantes. Épisodes le mardi et vendredi.</description>
     <itunes:author>Veille médicale</itunes:author>
-    <itunes:summary>Veille médicale automatique technique francophone, publiée le mardi et vendredi.</itunes:summary>
+    <itunes:summary>Veille automatique technique francophone, publiée le mardi et vendredi.</itunes:summary>
     <itunes:explicit>false</itunes:explicit>
     <itunes:category text="Health &amp; Fitness">
       <itunes:category text="Medicine"/>
@@ -310,7 +375,6 @@ def initialiser_feed():
 
 
 def ajouter_episode_au_feed(fichier_mp3, titre, description, duree_secondes):
-    """Ajoute un nouvel item au flux RSS."""
     initialiser_feed()
     base_url = os.environ.get("PODCAST_BASE_URL", "").rstrip("/")
     mp3_url = f"{base_url}/podcast/episodes/{fichier_mp3.name}"
@@ -356,13 +420,12 @@ def ajouter_episode_au_feed(fichier_mp3, titre, description, duree_secondes):
 
 
 def estimer_duree_mp3(fichier):
-    """Estimation grossière de la durée (1 Mo ≈ 60s à 128 kbps)."""
     taille_mo = fichier.stat().st_size / (1024 * 1024)
     return int(taille_mo * 60)
 
 
 # ============================================================
-# ENVOI EMAIL
+# EMAIL
 # ============================================================
 def envoyer_email(html_body, sujet):
     msg = EmailMessage()
@@ -371,7 +434,6 @@ def envoyer_email(html_body, sujet):
     msg["Subject"] = sujet
     msg.set_content("Cet email contient une version HTML.")
     msg.add_alternative(html_body, subtype="html")
-
     with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
         smtp.starttls()
         smtp.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
@@ -384,42 +446,58 @@ def envoyer_email(html_body, sujet):
 # ============================================================
 def run():
     today = datetime.now()
-    # weekday : 0=lundi ... 6=dimanche
     is_audio_day = today.weekday() in (1, 4)  # mardi & vendredi
     mode = os.environ.get("RUN_MODE", "auto")
     if mode == "email":
         is_audio_day = False
     elif mode == "audio":
         is_audio_day = True
-
     log.info(f"Date: {today.strftime('%A %d/%m/%Y')} | Mode: {mode} | Audio: {is_audio_day}")
 
-    # 1. Collecte
     donnees = {}
-    for theme, query in PUBMED_QUERIES.items():
-        log.info(f"PubMed -> {theme}")
-        articles = pubmed_search(query, JOURS_RECULS, ARTICLES_PAR_THEME * 2)
-        # Tri : favorise méta-analyses, RCT, guidelines
-        def score(a):
-            t = " ".join(a.get("pub_types", [])).lower()
-            s = 0
-            if "meta-analysis" in t: s += 10
-            if "guideline" in t: s += 8
-            if "randomized controlled trial" in t: s += 6
-            if "review" in t: s += 3
-            return s
-        articles.sort(key=score, reverse=True)
-        donnees[theme] = articles[:ARTICLES_PAR_THEME]
-        log.info(f"  -> {len(donnees[theme])} articles retenus")
+
+    # Thème 1 : Médecine générale & interne (PubMed)
+    theme = "Médecine générale & interne"
+    log.info(f"PubMed -> {theme}")
+    articles = pubmed_search(PUBMED_QUERIES[theme], JOURS_RECULS, ARTICLES_PAR_THEME * 2)
+    def score_pm(a):
+        t = " ".join(a.get("pub_types", [])).lower()
+        s = 0
+        if "meta-analysis" in t: s += 10
+        if "guideline" in t: s += 8
+        if "randomized controlled trial" in t: s += 6
+        if "review" in t: s += 3
+        return s
+    articles.sort(key=score_pm, reverse=True)
+    donnees[theme] = articles[:ARTICLES_PAR_THEME]
+    log.info(f"  -> {len(donnees[theme])} articles retenus")
+
+    # Thème 2 : Robotique humanoïde (Google News)
+    theme = "Robotique humanoïde"
+    log.info(f"Google News -> {theme}")
+    gn_articles = google_news_search(
+        GNEWS_QUERIES[theme],
+        JOURS_RECULS,
+        ARTICLES_PAR_THEME,
+    )
+    donnees[theme] = gn_articles
+    log.info(f"  -> {len(donnees[theme])} articles retenus")
+
+    # Thème 3 : Thérapies innovantes (PubMed)
+    theme = "Thérapies innovantes"
+    log.info(f"PubMed -> {theme}")
+    articles = pubmed_search(PUBMED_QUERIES[theme], JOURS_RECULS, ARTICLES_PAR_THEME * 2)
+    articles.sort(key=score_pm, reverse=True)
+    donnees[theme] = articles[:ARTICLES_PAR_THEME]
+    log.info(f"  -> {len(donnees[theme])} articles retenus")
 
     if not any(donnees.values()):
         log.warning("Aucun article trouvé, fin.")
         return
 
-    # 2. Email quotidien
+    # Email
     log.info("Génération email...")
     html = generer_email_html(donnees)
-    # Wrap HTML body
     full_html = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
 <style>
@@ -431,35 +509,28 @@ def run():
 </style>
 </head><body>
 {html}
-<hr><p style="color:#888;font-size:12px">Veille médicale — {today.strftime('%d/%m/%Y')}</p>
+<hr><p style="color:#888;font-size:12px">Veille — {today.strftime('%d/%m/%Y')}</p>
 </body></html>"""
-
-    sujet = f"Veille médicale — {today.strftime('%d/%m/%Y')}"
+    sujet = f"Veille — {today.strftime('%d/%m/%Y')}"
     envoyer_email(full_html, sujet)
 
-    # 3. Podcast (mardi/vendredi)
+    # Podcast
     if is_audio_day:
         log.info("Génération script audio...")
         script = generer_script_audio(donnees)
-
         nom_fichier = f"veille_{today.strftime('%Y%m%d')}.mp3"
         chemin_mp3 = EPISODES_DIR / nom_fichier
         log.info(f"Génération MP3 -> {chemin_mp3}")
         generer_audio(script, chemin_mp3)
-
-        # Métadonnées du flux
-        titre = f"Veille médicale du {today.strftime('%d/%m/%Y')}"
-        # Description = points clés extraits du script (premières lignes après l'intro)
+        titre = f"Veille du {today.strftime('%d/%m/%Y')}"
         lignes = script.split(".")
         description = ". ".join(lignes[1:6]).strip()[:500] + "..."
         duree = estimer_duree_mp3(chemin_mp3)
-
         log.info("Mise à jour du flux RSS...")
         ajouter_episode_au_feed(chemin_mp3, titre, description, duree)
+        log.info(f"Épisode publié : {chemin_mp3}")
 
-        log.info(f"✅ Épisode publié : {chemin_mp3}")
-
-    log.info("✅ Terminé")
+    log.info("Terminé")
 
 
 if __name__ == "__main__":
