@@ -1,0 +1,23 @@
+name: Keep workflow alive
+
+on:
+  schedule:
+    - cron: '0 12 1 * *'  # Le 1er de chaque mois à 12h UTC
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Touch keepalive file
+        run: |
+          mkdir -p .github
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/last-keepalive.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-keepalive.txt
+          git commit -m "Keepalive $(date -u +%Y-%m-%d)" || echo "Rien à commit"
+          git push || echo "Rien à push"
