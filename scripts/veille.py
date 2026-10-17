@@ -37,7 +37,7 @@ import edge_tts
 # ============================================================
 JOURS_RECULS = 2            # 2 jours pour rattraper le week-end
 ARTICLES_PAR_THEME = 7
-GROQ_MODEL = "llama-3.3-70b-versatile"  # ou "llama-3.1-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 # Dossiers
 ROOT = Path(__file__).resolve().parent.parent
